@@ -1,0 +1,39 @@
+{
+  "name": "workspace",
+  "version": "0.0.0",
+  "license": "MIT",
+  "private": true,
+  "workspaces": [
+    "artifacts/*",
+    "lib/*",
+    "scripts"
+  ],
+  "scripts": {
+    "preinstall": "sh -c 'rm -f package-lock.json pnpm-lock.yaml; case \"$npm_config_user_agent\" in yarn/*) ;; *) echo \"Use yarn instead\" >&2; exit 1 ;; esac'",
+    "dev": "yarn workspace @workspace/pharmacy-ops run dev",
+    "build": "yarn typecheck && yarn workspace @workspace/pharmacy-ops run build && yarn workspace @workspace/mockup-sandbox run build && yarn workspace @workspace/api-server run build",
+    "build:web": "yarn workspace @workspace/pharmacy-ops run build",
+    "typecheck:libs": "tsc --build",
+    "typecheck": "yarn typecheck:libs && yarn workspace @workspace/pharmacy-ops run typecheck && yarn workspace @workspace/mockup-sandbox run typecheck && yarn workspace @workspace/api-server run typecheck && yarn workspace @workspace/scripts run typecheck",
+    "test": "yarn workspace @workspace/pharmacy-ops test"
+  },
+  "dependencies": {
+    "@replit/connectors-sdk": "^0.4.3"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.6",
+    "typescript": "~5.9.3"
+  },
+  "engines": {
+    "node": "24.x"
+  },
+  "packageManager": "yarn@1.22.22",
+  "resolutions": {
+    "esbuild": "0.25.12",
+    "js-yaml": "4.3.2",
+    "postcss-selector-parser": "7.1.7",
+    "tinypool": "2.2.0",
+    "@vitest/mocker": "4.1.12",
+    "braces": "https://registry.npmjs.org/@franciscosolis/braces/-/braces-3.1.1.tgz"
+  }
+}

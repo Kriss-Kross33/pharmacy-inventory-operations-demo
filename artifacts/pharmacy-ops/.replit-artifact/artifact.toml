@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Pharmacy Operations"
+description = "A functional pharmacy inventory and operations demo for a small Ghanaian pharmacy, with role-based demo access, local data persistence, sales, batch-aware inventory, alerts, and audit history."
+version = "1.0.0"
+id = "artifacts/pharmacy-ops"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24310
+
+[services.development]
+run = "yarn workspace @workspace/pharmacy-ops run dev"
+
+[services.production]
+build = [ "yarn", "workspace", "@workspace/pharmacy-ops", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/pharmacy-ops/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24310"
+BASE_PATH = "/"

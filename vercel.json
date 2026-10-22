@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "installCommand": "YARN_PRODUCTION=false yarn install --frozen-lockfile",
+  "buildCommand": "yarn workspace @workspace/pharmacy-ops run build",
+  "outputDirectory": "artifacts/pharmacy-ops/dist/public",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
