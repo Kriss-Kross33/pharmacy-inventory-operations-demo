@@ -1,10 +1,11 @@
-import { STATE_VERSION, type CompleteSaleInput, type Role, type State, type Supplier } from "./types";
+import { migrateItem } from "./item-catalog";
+import { STATE_VERSION, type CompleteSaleInput, type Role, type State, type StockInInput, type Supplier } from "./types";
 import type { PharmacyRepository } from "./repository";
 import { buildSeed } from "./seed";
 import * as domain from "./services";
 
-export const STORAGE_KEY = "pharmacy-ops-demo-v4";
-const PREVIOUS_KEYS = ["pharmacy-ops-demo-v3", "pharmacy-ops-demo-v2", "pharmacy-ops-demo-v1"];
+export const STORAGE_KEY = "pharmacy-ops-demo-v5";
+const PREVIOUS_KEYS = ["pharmacy-ops-demo-v4", "pharmacy-ops-demo-v3", "pharmacy-ops-demo-v2", "pharmacy-ops-demo-v1"];
 
 function isStateShape(value: unknown): value is State {
   if (!value || typeof value !== "object") return false;
@@ -22,8 +23,12 @@ function migrate(parsed: State): State {
   return {
     ...parsed,
     version: STATE_VERSION,
+    medicines: (parsed.medicines || []).map((item) => migrateItem(item)),
     purchases: parsed.purchases || [],
-    stocktakes: parsed.stocktakes || [],
+    stocktakes: (parsed.stocktakes || []).map((take) => ({
+      ...take,
+      lines: (take.lines || []).map((line) => ({ ...line, reason: line.reason || "" })),
+    })),
     movements: parsed.movements || [],
     alertsAcknowledged: parsed.alertsAcknowledged || [],
   };
@@ -61,8 +66,8 @@ export function createLocalStorageRepository(
       const raw = storage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as State;
-        if (isStateShape(parsed) && parsed.version === STATE_VERSION) return parsed;
-        if (isStateShape(parsed) && [1, 2, 3].includes(parsed.version)) {
+        if (isStateShape(parsed) && parsed.version === STATE_VERSION) return migrate(parsed);
+        if (isStateShape(parsed) && [1, 2, 3, 4].includes(parsed.version)) {
           const migrated = migrate(parsed);
           persist(migrated);
           return migrated;
@@ -94,6 +99,7 @@ export function createLocalStorageRepository(
   }
 
   let state = load();
+  let stockInLock = false;
 
   function commit(next: State) {
     persist(next);
@@ -154,6 +160,21 @@ export function createLocalStorageRepository(
     receivePurchase(id) {
       apply((current) => domain.receivePurchase(current, id, ctx));
     },
+    receiveStockIn(input: StockInInput) {
+      if (stockInLock) throw new Error("A stock-in delivery is already being posted.");
+      stockInLock = true;
+      try {
+        let purchase = state.purchases[0];
+        apply((current) => {
+          const result = domain.receiveStockIn(current, input, ctx);
+          purchase = result.purchase;
+          return result.state;
+        });
+        return purchase;
+      } finally {
+        stockInLock = false;
+      }
+    },
     createSupplier(input: Omit<Supplier, "id">) {
       apply((current) => domain.createSupplier(current, input, ctx));
     },
@@ -167,8 +188,8 @@ export function createLocalStorageRepository(
       const next = apply((current) => domain.startStocktake(current, ctx));
       return next.stocktakes[0];
     },
-    updateStocktakeCount(takeId, batchId, counted) {
-      apply((current) => domain.updateStocktakeCount(current, takeId, batchId, counted, ctx));
+    updateStocktakeCount(takeId, batchId, counted, reason) {
+      apply((current) => domain.updateStocktakeCount(current, takeId, batchId, counted, ctx, reason));
     },
     approveStocktake(takeId) {
       const next = apply((current) => domain.approveStocktake(current, takeId, ctx));
@@ -201,10 +222,10 @@ export function createLocalStorageRepository(
     },
     import(json: string) {
       const parsed = JSON.parse(json) as State;
-      if (!isStateShape(parsed) || parsed.version !== STATE_VERSION) {
-        throw new Error("This file is not a valid Pharmacy Operations v4 backup.");
+      if (!isStateShape(parsed) || ![4, STATE_VERSION].includes(parsed.version)) {
+        throw new Error("This file is not a valid Pharmacy Operations backup.");
       }
-      commit(parsed);
+      commit(migrate(parsed));
     },
   };
 }

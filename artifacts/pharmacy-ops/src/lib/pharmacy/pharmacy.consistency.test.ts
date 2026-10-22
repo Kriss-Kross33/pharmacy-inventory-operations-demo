@@ -3,11 +3,16 @@ import { createLocalStorageRepository, STORAGE_KEY } from "./local-storage-repos
 import { availableStock, deriveAlerts, reportForRange, stockStatus } from "./queries";
 import { createDomainContext, emptyState } from "./seed";
 import {
+  addMedicine,
+  approveStocktake,
   completeSale,
   createPurchase,
   login,
   receivePurchase,
+  receiveStockIn,
+  startStocktake,
   updateMedicine,
+  updateStocktakeCount,
 } from "./services";
 import type { State } from "./types";
 
@@ -194,6 +199,126 @@ describe("shared pharmacy domain", () => {
     expect(report.revenue).toBe(sold.sales[0].total);
     expect(report.cost).toBe(4 * 200);
     expect(report.inventoryValuation).toBe(availableStock("med-001", sold, ctx.now()) * 200);
+  });
+
+  it("creates a non-medicine item without requiring medicine-only fields", () => {
+    const { ctx, state } = signedIn();
+    const next = addMedicine(
+      state,
+      {
+        name: "Cotton Wool 100g",
+        itemType: "medical_supply",
+        category: "Wound care",
+        brandName: "ClinicPack",
+        baseUnit: "pack",
+        sellingPrice: 900,
+        reorderThreshold: 12,
+        trackBatches: true,
+        trackExpiry: false,
+      },
+      ctx,
+    );
+    const created = next.medicines[0];
+    expect(created.itemType).toBe("medical_supply");
+    expect(created.genericName).toBe("");
+    expect(created.regulatoryClassification).toBe("Not applicable");
+    expect(created.imageDataUrl).toBe("");
+    expect(next.audit[0].entityType).toBe("Item");
+  });
+
+  it("stores an item photo on the shared catalog record", () => {
+    const { ctx, state } = signedIn();
+    const imageDataUrl =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const createdState = addMedicine(
+      state,
+      {
+        name: "Shelf photo wipes",
+        itemType: "baby_care",
+        category: "Baby toiletries",
+        baseUnit: "pack",
+        sellingPrice: 1500,
+        imageDataUrl,
+      },
+      ctx,
+    );
+    const created = createdState.medicines[0];
+    expect(created.imageDataUrl).toBe(imageDataUrl);
+    const cleared = updateMedicine(createdState, created.id, { imageDataUrl: "" }, ctx);
+    expect(cleared.medicines.find((item) => item.id === created.id)?.imageDataUrl).toBe("");
+  });
+
+  it("rejects a medicine that is missing required clinical fields", () => {
+    const { ctx, state } = signedIn();
+    expect(() =>
+      addMedicine(state, { name: "Incomplete tablet", itemType: "medicine", category: "General", sellingPrice: 100 }, ctx),
+    ).toThrow(/Generic name/);
+  });
+
+  it("posts a multi-item stock-in as one snapshot and ignores a duplicate request", () => {
+    const { ctx, state: opened } = signedIn();
+    const first = receiveStockIn(
+      opened,
+      {
+        supplierId: "sup-1",
+        invoiceNumber: "INV-STOCKIN-1",
+        purchaseDate: "2026-10-01",
+        requestId: "stockin-req-1",
+        items: [
+          { medicineId: "med-001", quantity: 10, unit: "tablet", conversion: 1, unitCost: 200, batchNumber: "SI-A", expiryDate: "2027-11-01" },
+          { medicineId: "med-012", quantity: 4, unit: "piece", conversion: 1, unitCost: 1500, batchNumber: "", expiryDate: "" },
+        ],
+      },
+      ctx,
+    );
+    expect(first.purchase.status).toBe("Received");
+    expect(availableStock("med-001", first.state, ctx.now())).toBe(10);
+    expect(availableStock("med-012", first.state, ctx.now())).toBe(4);
+    expect(first.state.movements.filter((movement) => movement.reference === first.purchase.reference)).toHaveLength(2);
+    expect(first.state.audit[0].action).toBe("Stock in");
+    const second = receiveStockIn(
+      first.state,
+      {
+        supplierId: "sup-1",
+        invoiceNumber: "INV-STOCKIN-1-RETRY",
+        purchaseDate: "2026-10-01",
+        requestId: "stockin-req-1",
+        items: [{ medicineId: "med-001", quantity: 10, unit: "tablet", conversion: 1, unitCost: 200, batchNumber: "SI-A", expiryDate: "2027-11-01" }],
+      },
+      ctx,
+    );
+    expect(second.purchase.id).toBe(first.purchase.id);
+    expect(availableStock("med-001", second.state, ctx.now())).toBe(10);
+    expect(() =>
+      receiveStockIn(
+        first.state,
+        {
+          supplierId: "sup-1",
+          invoiceNumber: "INV-STOCKIN-1",
+          purchaseDate: "2026-10-02",
+          items: [{ medicineId: "med-001", quantity: 2, unit: "tablet", conversion: 1, unitCost: 200, batchNumber: "SI-B", expiryDate: "2027-12-01" }],
+        },
+        ctx,
+      ),
+    ).toThrow(/already been posted/);
+  });
+
+  it("requires discrepancy reasons and CEO approval before a stocktake changes stock", () => {
+    const { ctx, state: opened } = signedIn();
+    const stocked = receiveOpening(opened, ctx, "med-001", 20);
+    const counting = startStocktake(stocked, ctx);
+    const take = counting.stocktakes[0];
+    const batch = counting.batches.find((item) => item.medicineId === "med-001")!;
+    expect(() => approveStocktake(updateStocktakeCount(counting, take.id, batch.id, 17, ctx), take.id, ctx)).toThrow(
+      /discrepancy reason/,
+    );
+    const explained = updateStocktakeCount(counting, take.id, batch.id, 17, ctx, "Broken blister pack");
+    const approved = approveStocktake(explained, take.id, ctx);
+    expect(availableStock("med-001", approved, ctx.now())).toBe(17);
+    expect(approved.movements[0].type).toBe("Stocktake adjustment");
+    expect(approved.movements[0].reason).toBe("Broken blister pack");
+    expect(approved.audit[0].action).toBe("Approve");
+    expect(approved.stocktakes[0].status).toBe("Approved");
   });
 });
 

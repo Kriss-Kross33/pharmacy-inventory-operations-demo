@@ -1,11 +1,17 @@
-import type { Batch, DerivedAlert, Medicine, Sale, State } from "./types";
+import { itemSubtitle } from "./item-catalog";
+import type { Batch, DerivedAlert, Item, Sale, State } from "./types";
+
+export type Medicine = Item;
 
 export function startOfDay(date = new Date()): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
 export function isExpired(batch: Batch, now = new Date()): boolean {
-  return new Date(`${batch.expiryDate}T00:00:00`) < startOfDay(now);
+  if (!batch.expiryDate) return false;
+  const expiry = new Date(`${batch.expiryDate}T00:00:00`);
+  if (Number.isNaN(expiry.getTime())) return false;
+  return expiry < startOfDay(now);
 }
 
 export function isSellable(batch: Batch, now = new Date()): boolean {
@@ -18,7 +24,7 @@ export function availableStock(medicineId: string, state: State, now = new Date(
     .reduce((sum, batch) => sum + batch.quantityRemaining, 0);
 }
 
-export function stockStatus(medicine: Medicine, state: State, now = new Date()): "In stock" | "Low stock" | "Out of stock" {
+export function stockStatus(medicine: Item, state: State, now = new Date()): "In stock" | "Low stock" | "Out of stock" {
   const quantity = availableStock(medicine.id, state, now);
   if (quantity === 0) return "Out of stock";
   if (quantity <= medicine.reorderThreshold) return "Low stock";
@@ -131,8 +137,8 @@ export function deriveAlerts(state: State, now = new Date()): DerivedAlert[] {
         id: `out-${medicine.id}`,
         severity: "high",
         title: "Out of stock",
-        description: `${medicine.name} has no available, unexpired stock.`,
-        link: `/medicines/${medicine.id}`,
+        description: `${medicine.name}${itemSubtitle(medicine) ? ` · ${itemSubtitle(medicine)}` : ""} has no available, unexpired stock.`,
+        link: `/inventory/items/${medicine.id}`,
       });
     } else if (quantity <= medicine.reorderThreshold) {
       alerts.push({
@@ -140,7 +146,7 @@ export function deriveAlerts(state: State, now = new Date()): DerivedAlert[] {
         severity: "medium",
         title: "Low stock",
         description: `${medicine.name} is at ${quantity} units, below its reorder point of ${medicine.reorderThreshold}.`,
-        link: `/medicines/${medicine.id}`,
+        link: `/inventory/items/${medicine.id}`,
       });
     }
   }

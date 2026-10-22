@@ -1,19 +1,53 @@
 import { completeSale, createPurchase, login, logout, receivePurchase } from "./services";
-import type { DomainContext, Medicine, Person, State, Supplier } from "./types";
+import type { DomainContext, Item, ItemType, Person, State, Supplier } from "./types";
 import { STATE_VERSION } from "./types";
 
-const names = [
-  ["Paracetamol 500mg Tablets", "Paracetamol", "Panadol", "500 mg", "Tablet", "Analgesics"],
-  ["Amoxicillin 500mg Capsules", "Amoxicillin", "Amoxil", "500 mg", "Capsule", "Antibiotics"],
-  ["Artemether/Lumefantrine 20/120mg", "Artemether/Lumefantrine", "Lumartem", "20/120 mg", "Tablet", "Antimalarials"],
-  ["ORS Sachets", "Oral rehydration salts", "ORS", "20.5 g", "Sachet", "Gastrointestinal"],
-  ["Cetirizine 10mg Tablets", "Cetirizine", "Zyrtec", "10 mg", "Tablet", "Allergy"],
-  ["Ibuprofen 400mg Tablets", "Ibuprofen", "Brufen", "400 mg", "Tablet", "Analgesics"],
-  ["Metformin 500mg Tablets", "Metformin", "Glucophage", "500 mg", "Tablet", "Diabetes"],
-  ["Amlodipine 5mg Tablets", "Amlodipine", "Norvasc", "5 mg", "Tablet", "Cardiovascular"],
-  ["Omeprazole 20mg Capsules", "Omeprazole", "Losec", "20 mg", "Capsule", "Gastrointestinal"],
-  ["Vitamin C 1000mg Tablets", "Ascorbic acid", "Cevit", "1000 mg", "Tablet", "Vitamins"],
-] as const;
+type CatalogSeed = {
+  name: string;
+  itemType: ItemType;
+  category: string;
+  brandName: string;
+  manufacturer: string;
+  genericName?: string;
+  strength?: string;
+  dosageForm?: string;
+  prescriptionRequired?: boolean;
+  regulatoryClassification?: string;
+  baseUnit: string;
+  sellingPrice: number;
+  reorderThreshold: number;
+  trackBatches?: boolean;
+  trackExpiry?: boolean;
+  description: string;
+};
+
+const catalogSeeds: CatalogSeed[] = [
+  { name: "Paracetamol 500mg Tablets", itemType: "medicine", category: "Analgesics", brandName: "Panadol", manufacturer: "Ernest Chemists", genericName: "Paracetamol", strength: "500 mg", dosageForm: "Tablet", regulatoryClassification: "OTC", baseUnit: "tablet", sellingPrice: 350, reorderThreshold: 25, description: "Paracetamol 500 mg tablet for pharmacy dispensing." },
+  { name: "Amoxicillin 500mg Capsules", itemType: "medicine", category: "Antibiotics", brandName: "Amoxil", manufacturer: "Kinapharma", genericName: "Amoxicillin", strength: "500 mg", dosageForm: "Capsule", prescriptionRequired: true, regulatoryClassification: "POM", baseUnit: "capsule", sellingPrice: 1200, reorderThreshold: 30, description: "Amoxicillin 500 mg capsule for pharmacy dispensing." },
+  { name: "Artemether/Lumefantrine 20/120mg", itemType: "medicine", category: "Antimalarials", brandName: "Lumartem", manufacturer: "Danadams", genericName: "Artemether/Lumefantrine", strength: "20/120 mg", dosageForm: "Tablet", prescriptionRequired: true, regulatoryClassification: "POM", baseUnit: "tablet", sellingPrice: 2800, reorderThreshold: 15, description: "Artemether/Lumefantrine 20/120 mg tablet for pharmacy dispensing." },
+  { name: "ORS Sachets", itemType: "medicine", category: "Gastrointestinal", brandName: "ORS", manufacturer: "M&G Pharmaceuticals", genericName: "Oral rehydration salts", strength: "20.5 g", dosageForm: "Sachet", regulatoryClassification: "OTC", baseUnit: "sachet", sellingPrice: 500, reorderThreshold: 20, description: "Oral rehydration salts 20.5 g sachet for pharmacy dispensing." },
+  { name: "Cetirizine 10mg Tablets", itemType: "medicine", category: "Allergy", brandName: "Zyrtec", manufacturer: "Ernest Chemists", genericName: "Cetirizine", strength: "10 mg", dosageForm: "Tablet", regulatoryClassification: "OTC", baseUnit: "tablet", sellingPrice: 900, reorderThreshold: 18, description: "Cetirizine 10 mg tablet for pharmacy dispensing." },
+  { name: "Ibuprofen 400mg Tablets", itemType: "medicine", category: "Analgesics", brandName: "Brufen", manufacturer: "Kinapharma", genericName: "Ibuprofen", strength: "400 mg", dosageForm: "Tablet", regulatoryClassification: "OTC", baseUnit: "tablet", sellingPrice: 750, reorderThreshold: 24, description: "Ibuprofen 400 mg tablet for pharmacy dispensing." },
+  { name: "Metformin 500mg Tablets", itemType: "medicine", category: "Diabetes", brandName: "Glucophage", manufacturer: "Danadams", genericName: "Metformin", strength: "500 mg", dosageForm: "Tablet", prescriptionRequired: true, regulatoryClassification: "POM", baseUnit: "tablet", sellingPrice: 600, reorderThreshold: 20, description: "Metformin 500 mg tablet for pharmacy dispensing." },
+  { name: "Amlodipine 5mg Tablets", itemType: "medicine", category: "Cardiovascular", brandName: "Norvasc", manufacturer: "M&G Pharmaceuticals", genericName: "Amlodipine", strength: "5 mg", dosageForm: "Tablet", prescriptionRequired: true, regulatoryClassification: "POM", baseUnit: "tablet", sellingPrice: 850, reorderThreshold: 15, description: "Amlodipine 5 mg tablet for pharmacy dispensing." },
+  { name: "Omeprazole 20mg Capsules", itemType: "medicine", category: "Gastrointestinal", brandName: "Losec", manufacturer: "Ernest Chemists", genericName: "Omeprazole", strength: "20 mg", dosageForm: "Capsule", prescriptionRequired: true, regulatoryClassification: "POM", baseUnit: "capsule", sellingPrice: 1100, reorderThreshold: 16, description: "Omeprazole 20 mg capsule for pharmacy dispensing." },
+  { name: "Vitamin C 1000mg Tablets", itemType: "medicine", category: "Vitamins", brandName: "Cevit", manufacturer: "Kinapharma", genericName: "Ascorbic acid", strength: "1000 mg", dosageForm: "Tablet", regulatoryClassification: "OTC", baseUnit: "tablet", sellingPrice: 1400, reorderThreshold: 20, description: "Ascorbic acid 1000 mg tablet for pharmacy dispensing." },
+  { name: "Sterile Gauze Pads 10x10cm", itemType: "medical_supply", category: "Wound care", brandName: "MediDress", manufacturer: "Stavem Medical Supplies", baseUnit: "pad", sellingPrice: 250, reorderThreshold: 40, description: "Sterile gauze pads for wound dressing." },
+  { name: "Digital Thermometer", itemType: "medical_supply", category: "Diagnostics", brandName: "CareTemp", manufacturer: "Löwenberg Medical", baseUnit: "piece", sellingPrice: 4500, reorderThreshold: 8, trackBatches: false, trackExpiry: false, description: "Oral digital thermometer for retail sale." },
+  { name: "Nitrile Examination Gloves", itemType: "medical_supply", category: "PPE", brandName: "SafeHands", manufacturer: "Crown Healthcare", baseUnit: "pair", sellingPrice: 180, reorderThreshold: 50, description: "Powder-free nitrile examination gloves." },
+  { name: "Omega-3 Softgels", itemType: "supplement", category: "Nutrition", brandName: "OceanPlus", manufacturer: "Pharma Health Ghana", baseUnit: "softgel", sellingPrice: 1600, reorderThreshold: 18, description: "Omega-3 fish oil softgels." },
+  { name: "Multivitamin Gummies", itemType: "supplement", category: "Vitamins", brandName: "DailyOne", manufacturer: "Apex Medical Stores", baseUnit: "gummy", sellingPrice: 2200, reorderThreshold: 16, description: "Daily multivitamin gummies." },
+  { name: "Zinc 20mg Tablets", itemType: "supplement", category: "Minerals", brandName: "Zinmax", manufacturer: "Danadams", genericName: "Zinc sulfate", strength: "20 mg", dosageForm: "Tablet", regulatoryClassification: "Not applicable", baseUnit: "tablet", sellingPrice: 800, reorderThreshold: 22, description: "Zinc 20 mg supplement tablets." },
+  { name: "Fluoride Toothpaste 100ml", itemType: "personal_care", category: "Oral care", brandName: "BrightSmile", manufacturer: "Sunda International", baseUnit: "tube", sellingPrice: 1800, reorderThreshold: 12, trackBatches: false, description: "Fluoride toothpaste 100 ml." },
+  { name: "Antiseptic Hand Wash 250ml", itemType: "personal_care", category: "Hygiene", brandName: "CleanCare", manufacturer: "Unichem Ghana", baseUnit: "bottle", sellingPrice: 2400, reorderThreshold: 10, description: "Antiseptic hand wash 250 ml." },
+  { name: "Body Lotion 400ml", itemType: "personal_care", category: "Skin care", brandName: "SoftDay", manufacturer: "Sunda International", baseUnit: "bottle", sellingPrice: 3200, reorderThreshold: 10, trackBatches: false, trackExpiry: false, description: "Daily moisturising body lotion." },
+  { name: "Size 3 Diapers 32-pack", itemType: "baby_care", category: "Diapers", brandName: "TinySoft", manufacturer: "Sunda International", baseUnit: "pack", sellingPrice: 6500, reorderThreshold: 8, trackBatches: false, trackExpiry: false, description: "Size 3 disposable diapers, 32-count pack." },
+  { name: "Infant Formula Stage 1 400g", itemType: "baby_care", category: "Infant formula", brandName: "Nurture", manufacturer: "Apex Medical Stores", baseUnit: "tin", sellingPrice: 9800, reorderThreshold: 6, description: "Stage 1 infant formula 400 g." },
+  { name: "Baby Wipes 80-count", itemType: "baby_care", category: "Baby toiletries", brandName: "GentleWipe", manufacturer: "Sunda International", baseUnit: "pack", sellingPrice: 2100, reorderThreshold: 14, trackBatches: false, trackExpiry: false, description: "Fragrance-light baby wipes, 80-count." },
+  { name: "Bottled Water 1.5L", itemType: "general_retail", category: "Beverages", brandName: "Voltic", manufacturer: "Voltic Ghana", baseUnit: "bottle", sellingPrice: 600, reorderThreshold: 24, trackBatches: false, trackExpiry: false, description: "Still bottled water 1.5 litres." },
+  { name: "Glucose Biscuits 150g", itemType: "general_retail", category: "Snacks", brandName: "Peak", manufacturer: "Local wholesale", baseUnit: "pack", sellingPrice: 750, reorderThreshold: 18, trackBatches: false, description: "Glucose biscuits 150 g." },
+  { name: "Laundry Bar Soap", itemType: "general_retail", category: "Household", brandName: "Key", manufacturer: "Local wholesale", baseUnit: "bar", sellingPrice: 900, reorderThreshold: 16, trackBatches: false, trackExpiry: false, description: "Household laundry bar soap." },
+];
 
 const supplierNames = [
   "MediPlus Ghana Ltd",
@@ -48,7 +82,22 @@ export function createDomainContext(start = new Date("2026-04-10T08:00:00.000Z")
   };
 }
 
-function catalog(): { employees: Person[]; suppliers: Supplier[]; medicines: Medicine[] } {
+function sellingUnitsFor(baseUnit: string) {
+  if (baseUnit === "tablet" || baseUnit === "capsule" || baseUnit === "softgel" || baseUnit === "gummy") {
+    return [
+      { name: baseUnit, conversion: 1 },
+      { name: "strip", conversion: 10 },
+      { name: "box", conversion: 100 },
+    ];
+  }
+  return [
+    { name: baseUnit, conversion: 1 },
+    { name: "pack", conversion: 10 },
+    { name: "case", conversion: 100 },
+  ];
+}
+
+function catalog(): { employees: Person[]; suppliers: Supplier[]; medicines: Item[] } {
   const employees: Person[] = [
     { id: "emp-ama", name: "Ama Mensah", role: "Administrator", active: true },
     { id: "emp-daniel", name: "Daniel Owusu", role: "Inventory Viewer", active: true },
@@ -61,45 +110,34 @@ function catalog(): { employees: Person[]; suppliers: Supplier[]; medicines: Med
     phone: `+233 24 ${String(3100000 + index * 739).slice(0, 6)}`,
     email: `orders@${name.toLowerCase().replace(/[^a-z]/g, "")}.gh`,
     address: ["North Industrial Area, Accra", "Adum, Kumasi", "Ring Road Central, Accra"][index % 3],
-    notes: "Approved local pharmaceutical supplier.",
+    notes: "Approved local supplier.",
     active: true,
   }));
-  const medicines: Medicine[] = Array.from({ length: 60 }, (_, index) => {
-    const details = names[index % names.length];
-    const suffix = index >= 10 ? ` — ${["Adult", "Paediatric", "Dispersible", "Extra", "Plus"][index % 5]}` : "";
-    const baseUnit = details[4].toLowerCase();
-    const sellingUnits =
-      baseUnit === "tablet" || baseUnit === "capsule"
-        ? [
-            { name: baseUnit, conversion: 1 },
-            { name: "strip", conversion: 10 },
-            { name: "box", conversion: 100 },
-          ]
-        : [
-            { name: baseUnit, conversion: 1 },
-            { name: "pack", conversion: 10 },
-            { name: "case", conversion: 100 },
-          ];
-    return {
-      id: `med-${String(index + 1).padStart(3, "0")}`,
-      name: details[0] + suffix,
-      genericName: details[1],
-      brandName: details[2],
-      strength: details[3],
-      dosageForm: details[4],
-      category: details[5],
-      manufacturer: ["Ernest Chemists", "Kinapharma", "Danadams", "M&G Pharmaceuticals"][index % 4],
-      barcode: `6161100${String(100000 + index).slice(-6)}`,
-      description: `${details[1]} ${details[3]} ${details[4].toLowerCase()} for pharmacy dispensing.`,
-      baseUnit,
-      sellingUnits,
-      sellingPrice: [350, 1200, 2800, 500, 900, 750, 600, 850, 1100, 1400][index % 10],
-      reorderThreshold: [25, 30, 15, 20, 18, 24, 20, 15, 16, 20][index % 10],
-      active: true,
-      createdAt: "2024-01-10T08:00:00.000Z",
-      updatedAt: "2026-04-01T08:00:00.000Z",
-    };
-  });
+  const medicines: Item[] = catalogSeeds.map((details, index) => ({
+    id: `med-${String(index + 1).padStart(3, "0")}`,
+    name: details.name,
+    itemType: details.itemType,
+    category: details.category,
+    brandName: details.brandName,
+    manufacturer: details.manufacturer,
+    barcode: `6161100${String(100000 + index).slice(-6)}`,
+    description: details.description,
+    genericName: details.genericName || "",
+    strength: details.strength || "",
+    dosageForm: details.dosageForm || "",
+    prescriptionRequired: Boolean(details.prescriptionRequired),
+    regulatoryClassification: details.regulatoryClassification || (details.itemType === "medicine" ? "OTC" : "Not applicable"),
+    baseUnit: details.baseUnit,
+    sellingUnits: sellingUnitsFor(details.baseUnit),
+    sellingPrice: details.sellingPrice,
+    reorderThreshold: details.reorderThreshold,
+    trackBatches: details.trackBatches !== false,
+    trackExpiry: details.trackExpiry !== false,
+    imageDataUrl: "",
+    active: true,
+    createdAt: "2024-01-10T08:00:00.000Z",
+    updatedAt: "2026-04-01T08:00:00.000Z",
+  }));
   return { employees, suppliers, medicines };
 }
 
@@ -145,23 +183,23 @@ export function buildSeed(ctx?: ReturnType<typeof createDomainContext>): State {
     expiryDate: string;
   }>>();
 
-  for (const [index, medicine] of state.medicines.entries()) {
+  for (const [index, item] of state.medicines.entries()) {
     for (const copy of [0, 1]) {
       const supplierId = `sup-${((index + copy) % 12) + 1}`;
-      const expired = index === 4 && copy === 1;
-      const soon = index === 2 && copy === 0;
+      const expired = item.trackExpiry && index === 4 && copy === 1;
+      const soon = item.trackExpiry && index === 2 && copy === 0;
       const quantity = index === 1 && copy === 1 ? 0 : index % 9 === 0 && copy === 0 ? 8 : 80 + ((index * 7 + copy * 11) % 40);
-      const expiry = new Date(Date.UTC(2027, (index + copy * 4) % 12, 12 + (index % 15)));
-      if (expired) expiry.setUTCFullYear(2025, 3, 12);
-      if (soon) expiry.setUTCMonth(6);
+      const expiry = item.trackExpiry ? new Date(Date.UTC(2027, (index + copy * 4) % 12, 12 + (index % 15))) : null;
+      if (expired && expiry) expiry.setUTCFullYear(2025, 3, 12);
+      if (soon && expiry) expiry.setUTCMonth(6);
       const lines = linesBySupplier.get(supplierId) || [];
       if (quantity > 0) {
         lines.push({
-          medicineId: medicine.id,
-          batchNumber: `GH${2026 + copy}${String(index + 1).padStart(4, "0")}`,
+          medicineId: item.id,
+          batchNumber: item.trackBatches ? `GH${2026 + copy}${String(index + 1).padStart(4, "0")}` : `LOT${String(index + 1).padStart(4, "0")}${copy}`,
           quantity,
-          unitCost: Math.round(medicine.sellingPrice * 0.56),
-          expiryDate: expiry.toISOString().slice(0, 10),
+          unitCost: Math.round(item.sellingPrice * 0.56),
+          expiryDate: expiry ? expiry.toISOString().slice(0, 10) : "",
         });
         linesBySupplier.set(supplierId, lines);
       }
@@ -189,20 +227,20 @@ export function buildSeed(ctx?: ReturnType<typeof createDomainContext>): State {
 
   for (let index = 0; index < 48; index += 1) {
     clock.setNow(new Date(now.getTime() - (47 - index) * 1.7 * 86400000));
-    const medicine = state.medicines[(index * 7 + 3) % state.medicines.length];
+    const item = state.medicines[(index * 7 + 3) % state.medicines.length];
     const quantity = (index % 3) + 1;
     try {
       state = completeSale(
         state,
         {
-          items: [{ medicineId: medicine.id, quantity, unit: medicine.baseUnit, conversion: 1 }],
+          items: [{ medicineId: item.id, quantity, unit: item.baseUnit, conversion: 1 }],
           paymentMethod: ["Cash", "Mobile Money", "Card"][index % 3],
           requestId: `seed-sale-${index + 1}`,
         },
         clock,
       ).state;
     } catch {
-      // Skip medicines whose remaining sellable stock cannot cover the requested units.
+      // Skip items whose remaining sellable stock cannot cover the requested units.
     }
   }
 

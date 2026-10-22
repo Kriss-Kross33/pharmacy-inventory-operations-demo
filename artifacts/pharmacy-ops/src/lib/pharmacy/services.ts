@@ -1,3 +1,4 @@
+import { normalizeItem } from "./item-catalog";
 import { assertCan, requireActor } from "./permissions";
 import { availableStock, isSellable } from "./queries";
 import type {
@@ -5,14 +6,16 @@ import type {
   Batch,
   CompleteSaleInput,
   DomainContext,
-  Medicine,
+  Item,
   Movement,
   Person,
   Purchase,
+  PurchaseItem,
   Role,
   Sale,
   SaleItem,
   State,
+  StockInInput,
   Stocktake,
   Supplier,
 } from "./types";
@@ -74,40 +77,16 @@ export function logout(state: State, ctx: DomainContext): State {
   return { ...audited, sessionId: null };
 }
 
-export function addMedicine(state: State, input: Partial<Medicine>, ctx: DomainContext): State {
+export function addMedicine(state: State, input: Partial<Item>, ctx: DomainContext): State {
   assertCan(state, "admin");
-  const now = ctx.now().toISOString();
-  const baseUnit = input.baseUnit || "tablet";
-  const item: Medicine = {
-    id: ctx.id("med"),
-    name: (input.name || "").trim() || "New medicine",
-    genericName: input.genericName || "",
-    brandName: input.brandName || "",
-    strength: input.strength || "",
-    dosageForm: input.dosageForm || "Tablet",
-    category: input.category || "General",
-    manufacturer: input.manufacturer || "",
-    barcode: input.barcode || "",
-    description: input.description || "",
-    baseUnit,
-    sellingUnits: input.sellingUnits || [
-      { name: baseUnit, conversion: 1 },
-      { name: baseUnit === "tablet" || baseUnit === "capsule" ? "strip" : "pack", conversion: 10 },
-      { name: "box", conversion: 100 },
-    ],
-    sellingPrice: Number(input.sellingPrice) || 0,
-    reorderThreshold: Number(input.reorderThreshold) || 20,
-    active: true,
-    createdAt: now,
-    updatedAt: now,
-  };
+  const item = normalizeItem(input, undefined, ctx.now().toISOString(), ctx.id("itm"));
   return appendAudit(
     { ...state, medicines: [item, ...state.medicines] },
     ctx,
     {
       action: "Create",
-      module: "Medicines",
-      entityType: "Medicine",
+      module: "Inventory",
+      entityType: "Item",
       entityId: item.id,
       description: `Created ${item.name}`,
       after: item,
@@ -115,27 +94,23 @@ export function addMedicine(state: State, input: Partial<Medicine>, ctx: DomainC
   );
 }
 
-export function updateMedicine(state: State, id: string, changes: Partial<Medicine>, ctx: DomainContext): State {
+export const addItem = addMedicine;
+
+export function updateMedicine(state: State, id: string, changes: Partial<Item>, ctx: DomainContext): State {
   assertCan(state, "admin");
-  const previous = state.medicines.find((medicine) => medicine.id === id);
-  if (!previous) throw new Error("Medicine not found.");
-  const next: Medicine = {
-    ...previous,
-    ...changes,
-    id: previous.id,
-    createdAt: previous.createdAt,
-    updatedAt: ctx.now().toISOString(),
-  };
+  const previous = state.medicines.find((item) => item.id === id);
+  if (!previous) throw new Error("Item not found.");
+  const next = normalizeItem({ ...previous, ...changes }, previous, ctx.now().toISOString(), previous.id);
   const priceChanged =
     changes.sellingPrice !== undefined && Number(changes.sellingPrice) !== previous.sellingPrice;
   const archived = previous.active && changes.active === false;
   return appendAudit(
-    { ...state, medicines: state.medicines.map((medicine) => (medicine.id === id ? next : medicine)) },
+    { ...state, medicines: state.medicines.map((item) => (item.id === id ? next : item)) },
     ctx,
     {
       action: archived ? "Archive" : priceChanged ? "Price change" : "Update",
-      module: "Medicines",
-      entityType: "Medicine",
+      module: "Inventory",
+      entityType: "Item",
       entityId: id,
       description: archived
         ? `Archived ${next.name}`
@@ -147,6 +122,8 @@ export function updateMedicine(state: State, id: string, changes: Partial<Medici
     },
   );
 }
+
+export const updateItem = updateMedicine;
 
 export function archiveMedicine(state: State, id: string, ctx: DomainContext): State {
   return updateMedicine(state, id, { active: false }, ctx);
@@ -273,7 +250,7 @@ export function createPurchase(
   if (!input.items.length) throw new Error("Add at least one purchase line.");
   for (const line of input.items) {
     if (!line.medicineId || !line.batchNumber.trim() || !Number.isInteger(line.quantity) || line.quantity < 1) {
-      throw new Error("Each purchase line needs a medicine, batch number and whole quantity.");
+      throw new Error("Each purchase line needs an item, batch number and whole quantity.");
     }
   }
   const purchase: Purchase = {
@@ -335,10 +312,13 @@ export function receivePurchase(state: State, purchaseId: string, ctx: DomainCon
 
   for (const line of purchase.items) {
     if (!line.medicineId || !Number.isInteger(line.quantity) || line.quantity < 1 || !line.batchNumber.trim()) {
-      throw new Error("Each purchase line needs a medicine, batch and quantity.");
+      throw new Error("Each purchase line needs an item, batch and quantity.");
     }
-    const expiry = new Date(`${line.expiryDate}T00:00:00`);
-    if (Number.isNaN(expiry.getTime())) throw new Error("Each purchase line needs a valid expiry date.");
+    const catalogItem = state.medicines.find((item) => item.id === line.medicineId);
+    if (catalogItem?.trackExpiry !== false) {
+      const expiry = new Date(`${line.expiryDate}T00:00:00`);
+      if (Number.isNaN(expiry.getTime())) throw new Error("Each purchase line needs a valid expiry date.");
+    }
     const batch: Batch = {
       id: ctx.id("bat"),
       medicineId: line.medicineId,
@@ -386,6 +366,144 @@ export function receivePurchase(state: State, purchaseId: string, ctx: DomainCon
       after: received,
     },
   );
+}
+
+export function receiveStockIn(
+  state: State,
+  input: StockInInput,
+  ctx: DomainContext,
+): { state: State; purchase: Purchase } {
+  const person = assertCan(state, "admin");
+  if (input.requestId) {
+    const existing = state.purchases.find((purchase) => purchase.requestId === input.requestId);
+    if (existing) return { state, purchase: existing };
+  }
+  if (!input.supplierId) throw new Error("A supplier is required.");
+  if (!state.suppliers.some((supplier) => supplier.id === input.supplierId && supplier.active)) {
+    throw new Error("Choose an active supplier.");
+  }
+  if (!input.items.length) throw new Error("Add at least one item to this delivery.");
+
+  const invoice = (input.invoiceNumber || "").trim();
+  if (invoice) {
+    const duplicate = state.purchases.find(
+      (purchase) =>
+        purchase.status === "Received" &&
+        purchase.supplierId === input.supplierId &&
+        (purchase.invoiceNumber || "").trim().toLowerCase() === invoice.toLowerCase(),
+    );
+    if (duplicate) throw new Error("This supplier invoice has already been posted.");
+  }
+
+  const timestamp = ctx.now();
+  const purchaseDate = input.purchaseDate || timestamp.toISOString().slice(0, 10);
+  const batches = cloneBatches(state.batches);
+  const movements: Movement[] = [];
+  const purchaseItems: PurchaseItem[] = [];
+
+  for (const line of input.items) {
+    const item = state.medicines.find((candidate) => candidate.id === line.medicineId && candidate.active);
+    if (!item) throw new Error("One or more delivery lines reference an unknown or archived item.");
+    if (!Number.isInteger(line.quantity) || line.quantity < 1) {
+      throw new Error(`Quantity for ${item.name} must be a whole number of 1 or more.`);
+    }
+    const chosen = item.sellingUnits.find((unit) => unit.name === (line.unit || item.baseUnit));
+    const conversion = line.conversion ?? chosen?.conversion ?? 1;
+    if (!chosen || !Number.isInteger(conversion) || conversion !== chosen.conversion || conversion < 1) {
+      throw new Error(`Invalid unit for ${item.name}.`);
+    }
+    const baseQuantity = line.quantity * conversion;
+    let batchNumber = (line.batchNumber || "").trim();
+    if (item.trackBatches && !batchNumber) {
+      throw new Error(`Batch number is required for ${item.name}.`);
+    }
+    if (!batchNumber) {
+      batchNumber = `LOT-${item.id.slice(-6)}-${purchaseDate.replaceAll("-", "")}`;
+    }
+    let expiryDate = (line.expiryDate || "").trim();
+    if (item.trackExpiry) {
+      const expiry = new Date(`${expiryDate}T00:00:00`);
+      if (!expiryDate || Number.isNaN(expiry.getTime())) {
+        throw new Error(`Expiry date is required for ${item.name}.`);
+      }
+    }
+
+    const unitCost = Number(line.unitCost);
+    if (!Number.isFinite(unitCost) || unitCost < 0) {
+      throw new Error(`Purchase cost for ${item.name} must be zero or more.`);
+    }
+    const purchaseCost = Math.round(unitCost / conversion);
+    const batch: Batch = {
+      id: ctx.id("bat"),
+      medicineId: item.id,
+      batchNumber,
+      supplierId: input.supplierId,
+      purchaseDate,
+      expiryDate,
+      quantityReceived: baseQuantity,
+      quantityRemaining: baseQuantity,
+      purchaseCost,
+      status: "active",
+    };
+    batches.push(batch);
+    movements.push({
+      id: ctx.id("mov"),
+      medicineId: item.id,
+      batchId: batch.id,
+      type: "Purchase receipt",
+      quantityChange: baseQuantity,
+      previousQuantity: 0,
+      newQuantity: baseQuantity,
+      reason: "Stock in",
+      performedBy: person.id,
+      timestamp: timestamp.toISOString(),
+      reference: "",
+    });
+    purchaseItems.push({
+      medicineId: item.id,
+      batchNumber,
+      quantity: baseQuantity,
+      unitCost: purchaseCost,
+      expiryDate,
+    });
+  }
+
+  const purchase: Purchase = {
+    id: ctx.id("pur"),
+    reference:
+      input.reference || `IN-${timestamp.getFullYear()}-${String(state.purchases.length + 1).padStart(3, "0")}`,
+    supplierId: input.supplierId,
+    invoiceNumber: invoice,
+    purchaseDate,
+    items: purchaseItems,
+    total: purchaseItems.reduce((sum, line) => sum + line.quantity * line.unitCost, 0),
+    paymentStatus: "Paid",
+    status: "Received",
+    notes: input.notes || "",
+    requestId: input.requestId,
+  };
+  movements.forEach((movement) => {
+    movement.reference = purchase.reference;
+  });
+
+  const next = appendAudit(
+    {
+      ...state,
+      batches,
+      movements: [...movements, ...state.movements],
+      purchases: [purchase, ...state.purchases],
+    },
+    ctx,
+    {
+      action: "Stock in",
+      module: "Inventory",
+      entityType: "Purchase",
+      entityId: purchase.id,
+      description: `Posted stock in ${purchase.reference}${invoice ? ` · invoice ${invoice}` : ""}.`,
+      after: purchase,
+    },
+  );
+  return { state: next, purchase };
 }
 
 export function createSupplier(state: State, input: Omit<Supplier, "id">, ctx: DomainContext): State {
@@ -484,6 +602,7 @@ export function startStocktake(state: State, ctx: DomainContext): State {
       counted: batch.quantityRemaining,
       variance: 0,
       valueDifference: 0,
+      reason: "",
     })),
   };
   return appendAudit(
@@ -500,7 +619,14 @@ export function startStocktake(state: State, ctx: DomainContext): State {
   );
 }
 
-export function updateStocktakeCount(state: State, takeId: string, batchId: string, counted: number, ctx: DomainContext): State {
+export function updateStocktakeCount(
+  state: State,
+  takeId: string,
+  batchId: string,
+  counted: number,
+  ctx: DomainContext,
+  reason?: string,
+): State {
   assertCan(state, "admin");
   if (!Number.isInteger(counted) || counted < 0) throw new Error("Count must be a whole number of zero or more.");
   const take = state.stocktakes.find((item) => item.id === takeId);
@@ -514,6 +640,7 @@ export function updateStocktakeCount(state: State, takeId: string, batchId: stri
       counted,
       variance,
       valueDifference: variance * (batch?.purchaseCost || 0),
+      reason: reason !== undefined ? reason : line.reason,
     };
   });
   const next: Stocktake = { ...take, lines };
@@ -530,6 +657,9 @@ export function approveStocktake(state: State, takeId: string, ctx: DomainContex
   for (const line of take.lines) {
     if (!Number.isInteger(line.counted) || line.counted < 0) {
       throw new Error("Every batch count must be a whole number of zero or more.");
+    }
+    if (line.variance !== 0 && !line.reason.trim()) {
+      throw new Error("Add a discrepancy reason for every variance before approval.");
     }
   }
   const timestamp = ctx.now().toISOString();
@@ -551,7 +681,7 @@ export function approveStocktake(state: State, takeId: string, ctx: DomainContex
       quantityChange: difference,
       previousQuantity: before.quantityRemaining,
       newQuantity: line.counted,
-      reason: `Approved stocktake ${takeId}`,
+      reason: line.reason.trim() || `Approved stocktake ${takeId}`,
       performedBy: person.id,
       timestamp,
       reference: takeId,

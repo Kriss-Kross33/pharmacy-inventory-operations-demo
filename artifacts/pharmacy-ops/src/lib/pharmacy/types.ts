@@ -12,25 +12,58 @@ export type SellingUnit = {
   conversion: number;
 };
 
-export type Medicine = {
+export const ITEM_TYPES = [
+  "medicine",
+  "medical_supply",
+  "supplement",
+  "personal_care",
+  "baby_care",
+  "general_retail",
+] as const;
+
+export type ItemType = (typeof ITEM_TYPES)[number];
+
+export const ITEM_TYPE_LABELS: Record<ItemType, string> = {
+  medicine: "Medicine",
+  medical_supply: "Medical supply",
+  supplement: "Supplement",
+  personal_care: "Personal care",
+  baby_care: "Baby care",
+  general_retail: "General retail",
+};
+
+export const REGULATORY_CLASSES = ["OTC", "POM", "Controlled", "Not applicable"] as const;
+
+export type RegulatoryClass = (typeof REGULATORY_CLASSES)[number];
+
+export type Item = {
   id: string;
   name: string;
-  genericName: string;
-  brandName: string;
-  strength: string;
-  dosageForm: string;
+  itemType: ItemType;
   category: string;
+  brandName: string;
   manufacturer: string;
   barcode: string;
   description: string;
+  genericName: string;
+  strength: string;
+  dosageForm: string;
+  prescriptionRequired: boolean;
+  regulatoryClassification: RegulatoryClass | string;
   baseUnit: string;
   sellingUnits: SellingUnit[];
   sellingPrice: number;
   reorderThreshold: number;
+  trackBatches: boolean;
+  trackExpiry: boolean;
+  imageDataUrl: string;
   active: boolean;
   createdAt: string;
   updatedAt: string;
 };
+
+/** @deprecated Use Item. Kept so existing screens and tests keep compiling. */
+export type Medicine = Item;
 
 export type Batch = {
   id: string;
@@ -132,6 +165,7 @@ export type Purchase = {
   paymentStatus: "Unpaid" | "Paid";
   status: "Draft" | "Received" | "Cancelled";
   notes: string;
+  requestId?: string;
 };
 
 export type StocktakeLine = {
@@ -142,6 +176,7 @@ export type StocktakeLine = {
   counted: number;
   variance: number;
   valueDifference: number;
+  reason: string;
 };
 
 export type Stocktake = {
@@ -167,7 +202,7 @@ export type State = {
   version: number;
   sessionId: string | null;
   employees: Person[];
-  medicines: Medicine[];
+  medicines: Item[];
   batches: Batch[];
   suppliers: Supplier[];
   sales: Sale[];
@@ -179,7 +214,7 @@ export type State = {
   alertsAcknowledged: string[];
 };
 
-export const STATE_VERSION = 4;
+export const STATE_VERSION = 5;
 
 export type DomainContext = {
   now: () => Date;
@@ -196,6 +231,26 @@ export type CompleteSaleInput = {
   paymentMethod: string;
   discount?: number;
   requestId?: string;
+};
+
+export type StockInLineInput = {
+  medicineId: string;
+  quantity: number;
+  unit?: string;
+  conversion?: number;
+  unitCost: number;
+  batchNumber?: string;
+  expiryDate?: string;
+};
+
+export type StockInInput = {
+  supplierId: string;
+  invoiceNumber: string;
+  purchaseDate: string;
+  notes?: string;
+  requestId?: string;
+  reference?: string;
+  items: StockInLineInput[];
 };
 
 export type DerivedAlert = {
